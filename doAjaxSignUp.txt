@@ -1,0 +1,496 @@
+$('input[name="doAjaxSignUp"]').click(function() {
+					var check;
+					check = js.Handler.checkCardInfo();
+					if (!check) {
+						return;
+					}
+
+					// 取得參數
+						var cardNo;
+						var mchType;
+						var signModule;
+						var signSession;
+						var idno;
+
+						cardNo = $('input[name="cardNo"]').val();
+						mchType = $('input[type="hidden"][name="mchType"]')
+								.val();
+
+						idno = $('input[name="userIdNo"]').val();
+
+						// 定義接收到回應後的資料處理函式
+						var resultHandler;
+						resultHandler = function(result) {
+							if (result == null || result == '') {
+								alert('發生錯誤，伺服器的處理程序被終止！');
+								return;
+							}
+
+							// alert(result);
+							// return;
+
+							// 檢查是否有取得原文
+							var jsonResult;
+							jsonResult = $.parseJSON(result);
+
+							var row;
+							row = $('tr[id="seq_' + jsonResult.rowData + '"]');
+
+							var column;
+							column = $(row).children('td[name="SIGN_STATE"]');
+
+							// var agents_name;
+							// agents_name=$(row).children('td[name="AGENT_NAME"]').html();
+
+							if (jsonResult.state) {
+								// 取得成功
+
+								// 開始簽章
+								var signResult;
+
+								// 設定訊息
+								js.StatusBox.setNotify('處理資料' + jsonResult.rowData + '...','開始簽章...');
+								$(column).html('開始簽章...');
+
+								// 執行佇列函式
+								// js.Handler.traceDequeue(js.Handler.dequeueCount);
+
+								// 簽章
+								// alert(jsonResult.plain);
+								// signResult=js.CardReader.HCACS.csSignData(jsonResult.plain);
+								if (js.CardReader.cardMachineType == 'HCACS') {
+									// alert(jsonResult.plain);
+									try {
+										signResult = js.CardReader.HCACS.csSignData(jsonResult.plain);
+									} catch (e) {
+										$(column).html('HCACS簽章錯誤' + e.message);
+									}
+								} else {
+									try {
+										signResult = js.CardReader.HCA.signData(jsonResult.plain);
+									} catch (e) {
+										$(column).html('HCA簽章錯誤' + e.message);
+									}
+								}
+
+								// 追蹤簽章時間
+								js.Handler.trace(signResult.timeSpan);
+								// alert();
+
+								// 執行佇列函式
+								js.Handler.dequeue(js.Handler.dequeueCount);
+
+								// 取得該元素的偏移量
+								/*
+								 * var position = $(row).position();
+								 * //$(row).scrollTop(position.top ); if
+								 * (position){ window.scrollTo(0,position.top); }
+								 */
+
+								$(column).html('準備更新伺服器資料...');
+
+								// 設定訊息
+								js.StatusBox.setNotify('處理資料' + jsonResult.rowData + '...','簽章完成(耗時' + signResult.timeSpan + '秒)<br/>更新伺服器資料...');
+
+								// 定義接收處理函式
+								var resultHandler2 = function(result) {
+									// alert(result);
+
+									if (result == null || result == '') {
+										alert('發生錯誤，伺服器的處理程序被終止！');
+										return;
+									}
+
+									$(column).html('取得狀態...');
+									jsonResult = $.parseJSON(result);
+
+									if (jsonResult.accept) {
+										// 簽章成功
+										var row;
+										row = $('tr[id="seq_' + jsonResult.rowData + '"]');
+
+										// 取消核取
+										var checkBox;
+										checkBox = $(row).children('td').children('input[type="checkbox"][name="rowCheckBox[]"]');
+
+										$(checkBox).removeAttr("checked");
+										js.CheckBoxUtility.changeTitle(checkBox, '取消選取', '選取');
+
+										// 刪除checkBox
+										$(checkBox).remove();
+
+										// 刪除狀態
+										$(row).removeAttr('state');
+
+										if (jsonResult.state) {
+
+											// 表示狀態正常
+											$(column).html('簽章完成！')
+
+											// 設定標題與訊息
+											js.StatusBox.setNotify('處理資料' + jsonResult.rowData + '...','簽章完成！');
+
+											// 填入回應資料											
+											$(row).children('td[name="SIGN_STATE"]').html(jsonResult.signState);
+											$(row).children('td[name="SIGN_STATE"]').attr('id',jsonResult.signState);
+											$(row).children('td[name="SIGN_DATE"]')	.html(jsonResult.signDate);
+											//2014/06/05 tailh 簽章完成時增加抓取簽章人的資料
+											$(row).children('td[name="SIGN_NAME"]')	.html(jsonResult.signName);
+
+
+										} else {
+											var message;
+											message = js.Handler.getErrorMessage('錯誤！',jsonResult.errorType,jsonResult.errorCode);
+
+											$(column).html('簽章完成！但無法取得資訊');
+
+											// 設定標題與訊息
+											js.StatusBox.setNotify('處理資料' + jsonResult.rowData + '...','簽章完成！但無法取得資訊' + '<br/>' + message);
+
+										}
+										// 修改counter
+										js.Handler.alterCounter(row);
+
+										// 顯示資訊
+										// js.Handler.showStatus();
+
+										// 設定進度
+										js.StatusBox.step(true);
+									} else {
+										var message;
+										// message='錯誤！'+jsonResult.message+jsonResult.errorCode;
+										message = js.Handler.getErrorMessage('錯誤！', jsonResult.errorType,	jsonResult.errorCode);
+										$(column).html(message);
+
+										// 設定標題與訊息
+										js.StatusBox.setNotify('處理資料' + signResult.rowData + '...',message);
+
+										// 設定進度
+										js.StatusBox.step(false);
+									}
+
+									// 執行佇列函式
+									// js.Handler.dequeue(js.Handler.dequeueCount);
+								};
+
+								if (signResult.state) {
+									$(column).html('提交伺服器資料...');
+									$('input[name="text"]').val(
+											signResult.signedData);
+
+									// 送交伺服器
+									/*
+									 * $.post('signature.jsa',
+									 * 'actionCode=doSignAfter'+
+									 * '&rowData='+jsonResult.rowData+
+									 * '&signedPlain='+encodeURIComponent(signResult.signedData)+
+									 * '&cardNo='+cardNo,resultHandler2 );
+									 */
+
+									// 提交
+									$.ajax( {
+												success : resultHandler2,
+												error : function(response) {
+													/*
+													 * alert(response.responseText);
+													 * alert(response.responseXML);
+													 * alert(response.status);
+													 * alert(response.statusText);
+													 */
+
+													// 取消核取
+													var checkBox;
+													checkBox = $(row).children('td').children('input[type="checkbox"][name="rowCheckBox[]"]');
+
+													// 設定進度
+													js.StatusBox.step(false);
+
+													$(checkBox).removeAttr("checked");
+													js.CheckBoxUtility.changeTitle(checkBox,'取消選取','選取');
+													$(column).html('請求簽章完成逾時');
+													$(document).dequeue();
+												},
+												async : true,
+												data : 'actionCode=doSignAfter'
+														+ '&rowData='
+														+ jsonResult.rowData
+														+ '&signedPlain='
+														+ encodeURIComponent(signResult.signedData)
+														+ '&cardNo=' + cardNo
+														+ '&idno=' + idno,
+												dataType : 'text',
+												timeout : 30000,
+												type : 'post',
+												url : 'signature.jsa'
+											});
+
+								} else {
+									var message = js.Handler.getErrorMessage('簽章失敗', result.errorType,result.errorCode);
+
+									$(column).html(message);
+
+									// 設定標題與訊息
+									js.StatusBox.setNotify('處理資料' + jsonResult.rowData + '...',message);
+
+									// 設定進度
+									js.StatusBox.step(false);
+								}
+							} else {
+								var message = js.Handler.getErrorMessage('取得待簽檔案失敗', jsonResult.errorType,jsonResult.errorCode);
+
+								$(column).html(message);
+
+								// 設定標題與訊息
+								js.StatusBox.setNotify('處理資料' + jsonResult.rowData + '...',message);
+
+								// 設定進度
+								js.StatusBox.step(false);
+
+								// 執行佇列函式
+								js.Handler.traceDequeue(js.Handler.dequeueCount);
+							}
+						};
+
+						// 定義循覽物件的處理函式
+						var eachHandler;
+						eachHandler = function(index, item) {
+							$(document).queue(function() {
+												if ($(item).attr('checked')) {
+													var row;
+													row = $(item).parent('td').parent('tr');
+													if ($(row).attr('state') == 'onSignUp') {// 正在簽章，不做處理
+														return;
+													}
+
+													// 增加狀態
+													$(row).attr('state',
+															'onSignUp');
+													var column;
+													column = $(row).children('td[name="SIGN_STATE"]');
+													$(column).html('取得簽章資料...');
+
+													var rowData;
+													rowData = $(row).attr('id').replace("seq_", "");
+
+													// 設定標題與訊息
+													js.StatusBox.setNotify('處理資料' + rowData + '...',	'取得簽章資料...');
+
+													// 提交
+													/*
+													 * $.post('signature.jsa',
+													 * 'rowData=' +rowData
+													 * +'&actionCode=doGetPlain',
+													 * resultHandler);
+													 */
+
+													// 提交
+													$.ajax( {
+																success : resultHandler,
+																error : function(response){
+																	// 取消核取
+																	var checkBox;
+																	checkBox = $(row).children('td').children('input[type="checkbox"][name="rowCheckBox[]"]');
+
+																	// 設定進度
+																	js.StatusBox.step(false);
+
+																	$(checkBox).removeAttr("checked");
+																	js.CheckBoxUtility.changeTitle(	checkBox,'取消選取',	'選取');
+																	$(column).html('請求待簽檔案逾時');
+																	$(document).dequeue();
+																},
+																async : true,
+																data : 'rowData=' + rowData + '&actionCode=doGetPlain',
+																dataType : 'text',
+																timeout : 30000,
+																type : 'post',
+																url : 'signature.jsa'
+															});
+												}
+											});
+						}
+
+						/* ※※※簽章程式開始執行處※※※ */
+
+						// 檢查Applet
+						var check;
+						check = js.Handler.checkApplet();
+						if (!check) {
+							return;
+						}
+
+						// 設定動作代碼
+						$(
+								'form[name="resultForm"] input[type="hidden"][name="actionCode"]')
+								.val('doSignUp');
+
+						// 取得勾選的資料
+						var checkedList;
+						checkedList = $('input[type="checkbox"][name="rowCheckBox[]"]:checked');
+
+						// 提交簽章資料
+						if (checkedList.length != 0) {
+							// 檢查是否有卡片資料
+							var cardNo;
+							cardNo = $('input[name="cardNo"]').val();
+							// alert(cardNo);
+
+							// 取得PIN碼
+							var pinCode;
+							pinCode = $('input[name="pinCode"]').val();
+
+							// 檢查是否有卡片資料
+							if (!cardNo) {
+								// 讀卡
+								var jsonObject;
+								// alert(1);
+								jsonObject = js.CardReader.getCardInfo(document
+										.getElementById('cardReaderMessage'));
+
+								if (jsonObject.state) {
+									// 嘗試新增卡片資料
+									js.Handler.addCardInfo(jsonObject.cardNo,
+											jsonObject.chineseName,
+											jsonObject.staffIdentificationID,
+											jsonObject.sex,
+											jsonObject.birthDate,
+											jsonObject.signCert,
+											jsonObject.startDate,
+											jsonObject.endDate);
+
+									// 設定控制型態
+									$('input[name="controlType"]').val('staff');
+									$(this).trigger('click');
+								} else {
+									var message = js.Handler.getErrorMessage(
+											result.message, result.errorType,
+											result.errorCode);
+									alert(message);
+									return;
+								}
+
+							} else {
+								// 檢查ID是否相同
+								var idNo;
+								idNo = $('input[name="staffIdentificationID"]')
+										.val();
+
+								var jsonObject;
+
+								// 如果是一般卡機，先重新初始化
+								if (js.CardReader.cardMachineType == 'HCA') {
+									var initResult;
+									initResult = js.CardReader.HCA
+											.initSession(pinCode);
+									if (!initResult.state) {
+										var message = js.Handler
+												.getErrorMessage(
+														initResult.message,
+														initResult.errorType,
+														initResult.errorCode);
+										alert(message);
+										return;
+									}
+								}
+
+								// 取得基本資料
+								jsonObject = js.CardReader.getBaseData();
+								if (jsonObject.state) {
+									if (idNo != jsonObject.staffIdentificationID) {
+										alert('檢查到現在插的卡片與先前的資料不相同\n' + '如您剛剛換過卡片請重新讀卡！');
+										return;
+									}
+								} else {
+									var message = js.Handler.getErrorMessage(
+											jsonObject.message,
+											jsonObject.errorType,
+											jsonObject.errorCode);
+									alert(message);
+									return;
+								}
+
+							}
+
+							// 檢查PIN碼
+							// alert(pinCode);
+							//alert("@@@1");
+							if (!pinCode) {
+								js.InputBox.acceptTrigger = $(this);
+								js.InputBox.setNotify('輸入PIN碼', '請輸入PIN碼用以驗證',
+										'');
+								js.InputBox.show();
+								js.InputBox.focus();
+								return;
+							}
+
+							var dialog;
+							dialog = confirm('共選擇了' + checkedList.length + '筆資料，是否確定開始簽章？\n' + '開始簽章後，請耐心等待所有資料簽章完成！');
+							if (dialog) {
+
+								// 重設StatusBox
+								js.StatusBox.reset();
+
+								// 顯示StatusBox
+								js.StatusBox.show();
+
+								// 設定標題與訊息
+								js.StatusBox.setNotify('檢查卡機狀態', '驗證PIN碼...');
+
+								// 驗pin碼
+								var result;
+								if (js.CardReader.cardMachineType == 'HCACS') {
+									result = js.CardReader.HCACS
+											.hcaVerifyPIN(pinCode);
+								} else {
+									result = js.CardReader.HCA
+											.initSession(pinCode);
+								}
+
+								// 驗pin碼是否通過
+								if (result.state) {
+
+									// 設定訊息
+									js.StatusBox.setMessage(result.message);
+									// 設定最大值
+									js.StatusBox.maximumValue = checkedList.length;
+
+									// 設定總筆數
+									js.StatusBox
+											.setAllCount(checkedList.length);
+
+									// 設定選項
+									js.StatusBox.setCloseOption(false);
+									js.StatusBox.setCancelOption(true);
+
+									// 設定狀態寬度
+									$('table.resultTable td.SIGN_STATE').eq(0)
+											.css('width', '100px');
+
+									// 逐一送出
+									$.each(checkedList, eachHandler);
+
+									// 執行佇列函式
+									js.Handler
+											.traceDequeue(js.Handler.dequeueCount - 1);
+									// js.Handler.dequeue(js.Handler.dequeueCount-1);
+
+									// 隱藏StatusBox
+									// js.StatusBox.hide();
+								} else {
+									js.StatusBox.setCloseOption(true);
+									js.StatusBox.setCancelOption(false);
+
+									var message = js.Handler.getErrorMessage(
+											result.message, result.errorType,
+											result.errorCode);
+									// 設定訊息
+									js.StatusBox.setNotify('發生錯誤', message);
+								}
+							} else {
+								return;
+							}
+						} else {
+							alert('沒有勾選任何簽章資料！');
+							return;
+						}
+					});
